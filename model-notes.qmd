@@ -74,6 +74,13 @@ of the sub-matrix filtered to rows agreeing with the previously sampled
 letters. In the implementation this is a `table()` call on the relevant
 column of `char_mat`.
 
+Note that these letter probabilities are **not** uniform over $\Sigma$: a
+letter that appears in many of the remaining words is drawn with higher
+probability than a rare one. The claim below is not that letters are drawn
+uniformly, but that the resulting distribution over *words* is uniform. The
+frequency-weighted letter draws are precisely the mechanism that achieves
+this.
+
 ### Equivalence to Uniform Sampling
 
 ::: {.callout-note}
@@ -111,6 +118,14 @@ $$
 The chain-rule decomposition is therefore not an approximation — it is an
 exact factorisation of the uniform distribution over words. The sequential
 structure is a computational convenience, not a modelling assumption.
+
+**Intuition.** Suppose 40 of 100 remaining words have 'a' at position 2.
+Drawing 'a' with probability 0.40 places 40% of the total probability mass
+onto those 40 words, giving each a $0.40/40 = 1/100$ share — identical to
+the share every other word receives through whatever letter it carries. The
+frequency weighting distributes mass evenly across words precisely because
+the counts in the numerator and denominator of each factor represent the same
+words, just at successive levels of refinement.
 
 ---
 
