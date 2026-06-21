@@ -1,0 +1,342 @@
+---
+title: "A Probabilistic Wordle Model"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    html-math-method: mathjax
+    theme: cosmo
+    embed-resources: true
+---
+
+## Overview
+
+This document derives the mathematical foundations of a probabilistic model
+that plays Wordle. The model maintains a set of candidate words that is
+progressively filtered by game feedback, sampling each guess uniformly from
+the candidates that remain. The process is surprisingly clean: sampling,
+feedback, and filtering all reduce to elementary operations on sets and
+multisets.
+
+---
+
+## Notation
+
+Let $\Sigma = \{a, b, \ldots, z\}$ be the alphabet and let
+
+$$
+\mathcal{W} \subset \Sigma^5
+$$
+
+be the word corpus — a finite set of five-letter strings. We write
+$w = (w_1, w_2, w_3, w_4, w_5)$ for a word $w \in \mathcal{W}$, indexing
+letters from 1 to 5.
+
+The **character matrix** $M \in \Sigma^{|\mathcal{W}| \times 5}$ has
+$M_{r,i} = w_r[i]$, where $w_r$ is the $r$-th word in $\mathcal{W}$.
+Each row of $M$ encodes one word; each column encodes the letter at one
+position across all words.
+
+Throughout a game, the model maintains a **candidate set**
+$\mathcal{W}^{(k)} \subseteq \mathcal{W}$, representing all words consistent
+with the feedback received so far. We write $M^{(k)}$ for the corresponding
+submatrix.
+
+---
+
+## The Autoregressive Sampler
+
+### Procedure
+
+Given a candidate set $\mathcal{W}'$, the model samples a guess
+$g = (g_1, \ldots, g_5)$ by the following sequential procedure.
+
+For position $i = 1, \ldots, 5$, let
+
+$$
+\mathcal{W}'(v_{1:i}) = \{ w \in \mathcal{W}' : w[j] = v_j \ \text{for} \ j = 1, \ldots, i \}
+$$
+
+denote the subset of candidates whose first $i$ letters match
+$v_1, \ldots, v_i$, with $\mathcal{W}'(v_{1:0}) = \mathcal{W}'$ by convention.
+
+Then:
+
+$$
+P(g_i = \ell \mid g_1 = v_1, \ldots, g_{i-1} = v_{i-1})
+= \frac{|\mathcal{W}'(v_{1:i-1} \cup \{\ell\})|}{|\mathcal{W}'(v_{1:i-1})|}
+\quad \text{for each } \ell \in \Sigma.
+$$
+
+Each conditional is the empirical frequency of letter $\ell$ in column $i$
+of the sub-matrix filtered to rows agreeing with the previously sampled
+letters. In the implementation this is a `table()` call on the relevant
+column of `char_mat`.
+
+### Equivalence to Uniform Sampling
+
+::: {.callout-note}
+**Proposition.** The autoregressive sampler produces a guess distributed
+uniformly over $\mathcal{W}'$:
+
+$$P(g = v) = \frac{\mathbf{1}[v \in \mathcal{W}']}{|\mathcal{W}'|}.$$
+:::
+
+**Proof.** Apply the chain rule and substitute the conditional probabilities:
+
+$$
+P(g = v)
+= \prod_{i=1}^{5} P(g_i = v_i \mid g_{1:i-1} = v_{1:i-1})
+= \prod_{i=1}^{5} \frac{|\mathcal{W}'(v_{1:i})|}{|\mathcal{W}'(v_{1:i-1})|}.
+$$
+
+This is a telescoping product. Writing out the factors:
+
+$$
+= \frac{|\mathcal{W}'(v_{1:1})|}{|\mathcal{W}'(v_{1:0})|}
+\cdot \frac{|\mathcal{W}'(v_{1:2})|}{|\mathcal{W}'(v_{1:1})|}
+\cdots
+\frac{|\mathcal{W}'(v_{1:5})|}{|\mathcal{W}'(v_{1:4})|}
+= \frac{|\mathcal{W}'(v_{1:5})|}{|\mathcal{W}'|}.
+$$
+
+Since $\mathcal{W}'(v_{1:5}) = \{v\}$ if $v \in \mathcal{W}'$ and
+$\emptyset$ otherwise:
+
+$$
+P(g = v) = \frac{\mathbf{1}[v \in \mathcal{W}']}{|\mathcal{W}'|}. \quad \square
+$$
+
+The chain-rule decomposition is therefore not an approximation — it is an
+exact factorisation of the uniform distribution over words. The sequential
+structure is a computational convenience, not a modelling assumption.
+
+---
+
+## Feedback Classification
+
+### Formal Definition
+
+Let $t \in \mathcal{W}$ be the (unknown) target word and $g \in \mathcal{W}$
+be the guess. The feedback function
+
+$$
+F : \Sigma^5 \times \Sigma^5 \to \{\mathsf{G}, \mathsf{Y}, \mathsf{B}\}^5
+$$
+
+maps the pair $(g, t)$ to a vector of **green** ($\mathsf{G}$), **yellow**
+($\mathsf{Y}$), and **grey** ($\mathsf{B}$) signals, computed in two passes.
+
+**Pass 1 — identify greens.** For each position $i$:
+
+$$
+f_i = \mathsf{G} \iff g_i = t_i.
+$$
+
+Let $S = \{i : f_i = \mathsf{G}\}$ be the set of green positions. These
+positions consume the corresponding target letters, leaving a **remaining
+budget** — a multiset of unmatched letters:
+
+$$
+R = \{\!\!\{ t_i : i \notin S \}\!\!\}.
+$$
+
+**Pass 2 — assign yellow or grey.** Iterate over $i \notin S$ in left-to-right
+order. At each step $R$ reflects letters not yet consumed by earlier
+assignments:
+
+$$
+f_i = \begin{cases}
+\mathsf{Y} & \text{if } g_i \in R, \quad R \leftarrow R \setminus \{g_i\} \\
+\mathsf{B} & \text{otherwise.}
+\end{cases}
+$$
+
+### Why Two Passes are Necessary
+
+The two-pass structure correctly handles guesses where a letter appears more
+times than it does in the target. Consider guessing **CREED** against the
+target **TABLE**:
+
+| Position | 1 | 2 | 3 | 4 | 5 |
+|----------|---|---|---|---|---|
+| Guess    | C | R | E | E | D |
+| Target   | T | A | B | L | E |
+| Feedback | $\mathsf{B}$ | $\mathsf{B}$ | $\mathsf{Y}$ | $\mathsf{B}$ | $\mathsf{B}$ |
+
+After Pass 1, no greens are identified and $R = \{\!\!\{T, A, B, L, E\}\!\!\}$.
+In Pass 2, the first **E** (position 3) is in $R$, so it receives
+$\mathsf{Y}$ and one **E** is consumed: $R \leftarrow \{\!\!\{T,A,B,L\}\!\!\}$.
+The second **E** (position 4) is no longer in $R$, so it receives $\mathsf{B}$.
+
+A naive single-pass approach using set membership rather than multiset
+consumption would incorrectly mark both **E**s as yellow.
+
+---
+
+## The Filtering Step
+
+### Constraint Sets
+
+Given guess $g$, observed feedback $f = F(g, t)$, and current candidate set
+$\mathcal{W}$, define three constraint sets:
+
+**Green constraints** — each green position fixes the letter:
+$$
+C_{\mathsf{G}}(g, f)
+= \{ w \in \mathcal{W} : w_i = g_i \ \text{for all} \ i \in S \},
+$$
+where $S = \{i : f_i = \mathsf{G}\}$.
+
+**Yellow constraints** — each yellow position excludes the letter from that
+column but requires it to appear somewhere:
+$$
+C_{\mathsf{Y}}(g, f)
+= \{ w \in \mathcal{W} : w_i \neq g_i \ \text{and} \ g_i \in \{w_1,\ldots,w_5\}
+\quad \text{for all} \ i \in Y \},
+$$
+where $Y = \{i : f_i = \mathsf{Y}\}$.
+
+**Grey constraints** — grey signals impose an exact count on each letter that
+appears grey at least once. Define the **non-grey count** for letter $\ell$:
+$$
+\hat{n}(\ell) = |\{i : g_i = \ell \ \text{and} \ f_i \neq \mathsf{B}\}|.
+$$
+Then:
+$$
+C_{\mathsf{B}}(g, f)
+= \left\{ w \in \mathcal{W} :
+    |\{j : w_j = \ell\}| = \hat{n}(\ell)
+    \quad \text{for all } \ell \text{ with } |\{i : g_i = \ell, f_i = \mathsf{B}\}| > 0
+  \right\}.
+$$
+
+When $\hat{n}(\ell) = 0$ (a purely grey letter), the constraint reduces to
+$\ell \notin \{w_1,\ldots,w_5\}$. When $\hat{n}(\ell) > 0$ (the letter also
+has a yellow or green hit), the grey signal pins the count to exactly
+$\hat{n}(\ell)$, ruling out words with additional occurrences.
+
+### The Filtered Candidate Set
+
+$$
+\text{Filter}(\mathcal{W}, g, f)
+= C_{\mathsf{G}}(g, f) \cap C_{\mathsf{Y}}(g, f) \cap C_{\mathsf{B}}(g, f).
+$$
+
+The implementation applies these three passes sequentially, discarding rows
+from `char_mat` after each one. Because all operations are row-wise
+eliminations, the order does not affect the final result.
+
+---
+
+## Posterior Interpretation
+
+The filtering step has a clean Bayesian reading. Assume a uniform prior over
+the word corpus:
+
+$$
+P(t = w) = \frac{1}{|\mathcal{W}|} \quad \text{for all } w \in \mathcal{W}.
+$$
+
+The feedback $f$ is a deterministic function of $g$ and $t$, so the
+likelihood is:
+
+$$
+P(f \mid t = w, g) = \mathbf{1}[F(g, w) = f].
+$$
+
+Applying Bayes' rule:
+
+$$
+P(t = w \mid g, f)
+= \frac{P(f \mid t = w, g) \, P(t = w)}{P(f \mid g)}
+= \frac{\mathbf{1}[w \in \text{Filter}(\mathcal{W}, g, f)]}{|\text{Filter}(\mathcal{W}, g, f)|}.
+$$
+
+The posterior is uniform over the filtered candidate set. **Filtering is
+exact Bayesian updating.** No approximation is made: every word consistent
+with the observed feedback is equally plausible, and every inconsistent word
+is ruled out with probability 1.
+
+The model therefore maintains the correct posterior at every step, and each
+guess is drawn from this posterior predictive — the distribution a Bayesian
+agent would use if it drew its next guess at random from the remaining
+plausible words.
+
+---
+
+## The Sequential Game
+
+### State Dynamics
+
+The game maintains a sequence of candidate sets:
+
+$$
+\mathcal{W}^{(0)} = \mathcal{W}, \qquad
+\mathcal{W}^{(k)} = \text{Filter}\!\left(\mathcal{W}^{(k-1)},\, g^{(k)},\, f^{(k)}\right),
+$$
+
+where $g^{(k)} \sim \text{Uniform}(\mathcal{W}^{(k-1)})$ and
+$f^{(k)} = F(g^{(k)}, t)$.
+
+The game is won on round $k^*$ when $g^{(k^*)} = t$, which is equivalent to
+$f^{(k^*)} = (\mathsf{G}, \mathsf{G}, \mathsf{G}, \mathsf{G}, \mathsf{G})$.
+
+### Target Retention
+
+::: {.callout-note}
+**Proposition.** The target is never eliminated:
+$t \in \mathcal{W}^{(k)}$ for all $k < k^*$.
+:::
+
+**Proof.** It suffices to show $t \in \text{Filter}(\mathcal{W}, g, F(g, t))$
+for any $g \neq t$ and $\mathcal{W} \ni t$.
+
+- **Green**: if $f_i = \mathsf{G}$ then $t_i = g_i$ by definition, so $t$
+  satisfies the green constraint.
+- **Yellow**: if $f_i = \mathsf{Y}$ then $g_i \neq t_i$ (so $t_i \neq g_i$)
+  and $g_i \in R \subseteq \{t_j : j \notin S\} \subseteq \{t_1,\ldots,t_5\}$,
+  so $t$ satisfies the yellow constraint.
+- **Grey**: the grey constraint pins the count of each grey letter $\ell$ to
+  $\hat{n}(\ell)$. By construction of the two-pass algorithm, $\hat{n}(\ell)$
+  equals exactly the number of times $\ell$ appears in $t$ and is accounted
+  for by a green or yellow signal. The remaining occurrences — those that
+  received grey — appear in neither $t$'s unmatched letters nor the remaining
+  budget $R$, so the count of $\ell$ in $t$ is indeed $\hat{n}(\ell)$. $\square$
+
+This guarantees the game terminates: $\mathcal{W}^{(k)}$ always contains $t$,
+so there is always a nonzero probability of guessing correctly on each round.
+
+### Candidate Set Contraction
+
+On any unsuccessful round, the filtered set strictly shrinks:
+$|\mathcal{W}^{(k)}| < |\mathcal{W}^{(k-1)}|$, because the guess $g^{(k)}$
+itself is eliminated. To see this, note that $g^{(k)} \neq t$ (the round was
+unsuccessful), and $g^{(k)}$ is inconsistent with $f^{(k)} = F(g^{(k)}, t)$
+whenever $g^{(k)} \neq t$: for any position $i$ where $g^{(k)}_i \neq t_i$,
+either the yellow constraint excludes $g^{(k)}$ (if $f^{(k)}_i = \mathsf{Y}$,
+then $g^{(k)}_i$ must not appear at position $i$, but it does) or the green
+constraint is unsatisfied. Hence $g^{(k)} \notin \mathcal{W}^{(k)}$.
+
+In practice the contraction is much sharper: each guess typically partitions
+$\mathcal{W}^{(k-1)}$ into $3^5 = 243$ possible feedback patterns, and only
+the words falling into the same feedback cell as $t$ survive.
+
+---
+
+## Summary
+
+The model reduces to three interlocking operations:
+
+| Operation | Mathematical object | Effect |
+|-----------|---------------------|--------|
+| Sample guess | $g^{(k)} \sim \text{Uniform}(\mathcal{W}^{(k-1)})$ | Draw from posterior predictive |
+| Classify feedback | $f^{(k)} = F(g^{(k)}, t)$ | Two-pass multiset algorithm |
+| Update candidates | $\mathcal{W}^{(k)} = \text{Filter}(\mathcal{W}^{(k-1)}, g^{(k)}, f^{(k)})$ | Exact Bayesian update |
+
+The autoregressive chain-rule sampler is an exact, computationally efficient
+way to draw from the uniform distribution over the current candidate set. The
+filter is exact Bayesian conditioning. Together they define a principled
+probabilistic agent that maintains the correct posterior over the target word
+at every step of the game.
