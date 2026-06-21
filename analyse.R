@@ -1,3 +1,29 @@
+#' Compute summary statistics from simulation results
+#'
+#' Derives standard Wordle performance metrics from the data frame returned by
+#' \code{\link{simulate_games}}.
+#'
+#' @param results A data frame as returned by \code{\link{simulate_games}},
+#'   containing at minimum columns \code{solved} (logical) and \code{n_guesses}
+#'   (integer, \code{NA} for unsolved games).
+#'
+#' @return A named list with seven elements:
+#'   \describe{
+#'     \item{\code{n_games}}{Total number of games played.}
+#'     \item{\code{n_wins}}{Number of games solved within six guesses.}
+#'     \item{\code{win_pct}}{Win percentage, rounded to the nearest integer.}
+#'     \item{\code{avg_guesses}}{Mean number of guesses across solved games,
+#'       rounded to one decimal place.}
+#'     \item{\code{max_streak}}{Longest consecutive run of wins across all
+#'       games in sequence.}
+#'     \item{\code{curr_streak}}{Length of the current winning streak (games
+#'       from the end of the sequence); \code{0} if the last game was a loss.}
+#'     \item{\code{guess_dist}}{Integer vector of length 6 giving the number of
+#'       games solved in exactly 1, 2, \ldots, 6 guesses.}
+#'   }
+#'
+#' @seealso \code{\link{simulate_games}} to generate \code{results};
+#'   \code{\link{plot_stats}} to visualise the returned statistics.
 compute_stats <- function(results) {
   n_games     <- nrow(results)
   n_wins      <- sum(results$solved)
@@ -22,6 +48,21 @@ compute_stats <- function(results) {
   )
 }
 
+
+#' Plot a Wordle-style statistics dashboard
+#'
+#' Renders a two-panel image mimicking the Wordle statistics screen: a row of
+#' summary metrics at the top and a horizontal guess-distribution bar chart
+#' below.
+#'
+#' @param stats    A named list as returned by \code{\link{compute_stats}}.
+#' @param filename Path to the output PNG file. Defaults to
+#'   \code{"wordle_stats.png"} in the current working directory.
+#'
+#' @return The \code{filename} path, invisibly.
+#'
+#' @seealso \code{\link{compute_stats}} to produce \code{stats} from simulation
+#'   results; \code{\link{plot_game}} for per-game tile grid images.
 plot_stats <- function(stats, filename = "wordle_stats.png") {
   library(ggplot2)
   library(gridExtra)

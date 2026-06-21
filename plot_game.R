@@ -1,3 +1,23 @@
+#' Plot the tile grid for a single Wordle game
+#'
+#' Renders a 6 \eqn{\times} 5 tile grid in the style of the Wordle board:
+#' played rows show coloured tiles (green / yellow / grey) with the guessed
+#' letter; unplayed rows are shown as empty white tiles. The target word is
+#' displayed as the plot title.
+#'
+#' @param history     A list of up to six elements as stored in the
+#'   \code{history} field of the list returned by \code{\link{play_game}}.
+#'   Each element is a named list with \code{guess} (a five-letter string) and
+#'   \code{feedback} (a character vector of length 5 containing \code{"green"},
+#'   \code{"yellow"}, or \code{"grey"}).
+#' @param target_word A single five-letter string used as the plot title.
+#' @param filename    Path to the output PNG file. Defaults to
+#'   \code{"wordle_result.png"} in the current working directory.
+#'
+#' @return The \code{filename} path, invisibly.
+#'
+#' @seealso \code{\link{play_game}} to generate \code{history};
+#'   \code{\link{plot_stats}} for an aggregate statistics dashboard.
 plot_game <- function(history, target_word, filename = "wordle_result.png") {
   library(ggplot2)
 
